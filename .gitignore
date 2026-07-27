@@ -1,0 +1,12 @@
+# PowerShell temporary and generated files
+*.tmp
+*.log
+
+# Editor settings
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
