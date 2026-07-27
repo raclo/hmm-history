@@ -53,22 +53,25 @@ After editing the profile, reload it:
 Search the saved history:
 
 ```powershell
-hmm route
+hmm pip
 ```
 
 Example output:
 
 ```text
-hmm: "route" — 45 results — page 1/3
+hmm: "pip" — 18 results — page 1/2
 
-[ 1] notepad++ route_home.bat
-[ 2] C:\raclo_ps\route_home.bat
-[ 3] .\route_home.bat
-[ 4] .\route_at_office.bat
-[ 5] route print 192.168.178.1
+[ 1] python -m pip list --outdated
+[ 2] pip install passlib[bcrypt] --trusted-host pypi.org --trusted-host files.pythonhosted.org
+[ 3] pip install matplotlib --trusted-host pypi.org --trusted-host files.pythonhosted.org --disable-pip-versi…
+[ 4] python -m pip install --upgrade pip setuptools wheel
+[ 5] pip install fastapi uvicorn[standard] python-multipart
+[ 6] python -m pip install -r requirements.txt
+[ 7] pip freeze > requirements.txt
+[ 8] Get-ChildItem -Recurse -Filter requirements.txt | ForEach-Object { python -m pip install -r $_.FullName }
 
 Number = recall, Enter = next, P = previous, Q = quit: 2
-PS C:\> C:\raclo_ps\route_home.bat
+PS C:\> pip install passlib[bcrypt] --trusted-host pypi.org --trusted-host files.pythonhosted.org
 ```
 
 The selected command is inserted into the prompt but is **not executed**. Edit it as needed, then press Enter when ready.
