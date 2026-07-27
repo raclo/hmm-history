@@ -2,7 +2,7 @@
 name: Bug report
 about: Report a reproducible problem with hmm-history
 title: "[Bug]"
-labels: ''
+labels: bug
 assignees: ''
 
 ---
