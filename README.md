@@ -24,7 +24,39 @@ A lightweight, dependency-free PowerShell history search and recall tool built o
 
 ## Installation
 
-Clone or download this repository, then dot-source `hmm.ps1` from your PowerShell profile.
+Clone or download this repository, open PowerShell 7 in the repository directory, and run the installer:
+
+```powershell
+.\install.ps1
+```
+
+The installer:
+
+- copies `hmm.ps1` to `$HOME\.hmm-history\hmm.ps1`;
+- creates the current PowerShell host profile if it does not exist;
+- adds the required dot-source line without replacing existing profile content.
+
+Reload the profile to make `hmm` available in the current session:
+
+```powershell
+. $PROFILE
+```
+
+To update an existing installation, allow the installer to replace the installed copy:
+
+```powershell
+.\install.ps1 -Force
+```
+
+You can also select a different installation directory:
+
+```powershell
+.\install.ps1 -InstallDirectory 'C:\Tools\hmm-history'
+```
+
+### Manual installation
+
+As an alternative to the installer, add a dot-source line for `hmm.ps1` to your PowerShell profile:
 
 ```powershell
 . "$HOME\path\to\hmm-history\hmm.ps1"
@@ -42,7 +74,7 @@ To open the active profile:
 notepad $PROFILE
 ```
 
-After editing the profile, reload it:
+After editing the profile manually, reload it:
 
 ```powershell
 . $PROFILE

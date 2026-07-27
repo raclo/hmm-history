@@ -32,13 +32,15 @@ if (-not (Test-Path -LiteralPath $profileDirectory)) {
     New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
 }
 
-if (-not (Test-Path -LiteralPath $profilePath)) {
+$profileCreated = -not (Test-Path -LiteralPath $profilePath)
+
+if ($profileCreated) {
     New-Item -ItemType File -Path $profilePath -Force | Out-Null
 }
 
 $profileContent = Get-Content -LiteralPath $profilePath -Raw
 
-if ($profileContent -notmatch [regex]::Escape($dotSourceLine)) {
+if ($null -eq $profileContent -or $profileContent -notmatch [regex]::Escape($dotSourceLine)) {
     $block = @"
 
 # hmm-history
@@ -58,7 +60,12 @@ Write-Host "Script:  $targetScript"
 Write-Host "Profile: $profilePath"
 
 if ($profileChanged) {
-    Write-Host 'The PowerShell profile was updated.' -ForegroundColor Cyan
+    if ($profileCreated) {
+        Write-Host 'The PowerShell profile was created and configured.' -ForegroundColor Cyan
+    }
+    else {
+        Write-Host 'The PowerShell profile was updated.' -ForegroundColor Cyan
+    }
 }
 else {
     Write-Host 'The profile already contained the required dot-source line.' -ForegroundColor DarkGray
