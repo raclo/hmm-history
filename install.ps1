@@ -12,7 +12,10 @@ $sourceScript = Join-Path $PSScriptRoot 'hmm.ps1'
 $targetScript = Join-Path $InstallDirectory 'hmm.ps1'
 $profilePath = $PROFILE.CurrentUserCurrentHost
 $profileDirectory = Split-Path -Parent $profilePath
-$dotSourceLine = '. "{0}"' -f $targetScript
+$escapedTargetScript = $targetScript.Replace('`', '``')
+$escapedTargetScript = $escapedTargetScript.Replace('$', '`$')
+$escapedTargetScript = $escapedTargetScript.Replace('"', '`"')
+$dotSourceLine = '. "{0}"' -f $escapedTargetScript
 
 if (-not (Test-Path -LiteralPath $sourceScript)) {
     throw "hmm.ps1 was not found next to install.ps1: $sourceScript"

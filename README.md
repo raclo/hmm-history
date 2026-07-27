@@ -34,7 +34,8 @@ The installer:
 
 - copies `hmm.ps1` to `$HOME\.hmm-history\hmm.ps1`;
 - creates the current PowerShell host profile if it does not exist;
-- adds the required dot-source line without replacing existing profile content.
+- adds the required dot-source line without replacing existing profile content;
+- configures global PSReadLine bindings for Enter, Up Arrow, and Down Arrow when the profile is loaded.
 
 Reload the profile to make `hmm` available in the current session:
 
@@ -80,6 +81,30 @@ After editing the profile manually, reload it:
 . $PROFILE
 ```
 
+### Uninstallation
+
+Open your PowerShell profile:
+
+```powershell
+notepad $PROFILE
+```
+
+Remove the block added by the installer, including the path shown on your system:
+
+```powershell
+# hmm-history
+. "<installation-directory>\hmm.ps1"
+```
+
+Then remove the default installation directory:
+
+```powershell
+$hmmInstallDirectory = Join-Path $HOME '.hmm-history'
+Remove-Item -LiteralPath $hmmInstallDirectory -Recurse -Force
+```
+
+If you used `-InstallDirectory`, remove that directory instead. Close and reopen PowerShell to discard the functions and PSReadLine key bindings already loaded in the current session.
+
 ## Usage
 
 Search the saved history:
@@ -91,11 +116,11 @@ hmm pip
 Example output:
 
 ```text
-hmm: "pip" — 18 results — page 1/2
+hmm: "pip" - 18 results - page 1/2
 
 [ 1] python -m pip list --outdated
 [ 2] pip install passlib[bcrypt] --trusted-host pypi.org --trusted-host files.pythonhosted.org
-[ 3] pip install matplotlib --trusted-host pypi.org --trusted-host files.pythonhosted.org --disable-pip-versi…
+[ 3] pip install matplotlib --trusted-host pypi.org --trusted-host files.pythonhosted.org --disable-pip-versi...
 [ 4] python -m pip install --upgrade pip setuptools wheel
 [ 5] pip install fastapi uvicorn[standard] python-multipart
 [ 6] python -m pip install -r requirements.txt
@@ -167,18 +192,22 @@ It reconstructs multiline commands, filters them using a case-insensitive litera
 
 The standard Enter behavior remains unchanged for commands that do not match the `hmm` syntax.
 
+## Privacy and security
+
+All history processing is local. `hmm` does not make network requests or transmit history data.
+
+PowerShell history can contain passwords, tokens, or other sensitive values entered on the command line. `hmm` does not redact matching commands, so review terminal output before sharing screenshots or logs. A recalled command is inserted into the editable prompt and is not executed until you press Enter.
+
 ## Known limitations
 
 - Intended for interactive PowerShell sessions; it is not designed for non-interactive scripts.
-- The custom Enter handler may conflict with another profile script that also replaces the Enter key binding.
+- Loading `hmm.ps1` replaces the current PSReadLine bindings for Enter, Up Arrow, and Down Arrow. It may conflict with another profile script that configures the same keys.
 - Console rendering can vary between hosts. Windows Terminal with a recent PowerShell and PSReadLine version is recommended.
 - `hmm <number>` refers to the most recent result set only.
 
 ## Acknowledgements
 
-The original idea and the memorable `hmm` function name were inspired by Den Delimarsky's article, [Find a command in PowerShell history](https://den.dev/blog/find-command-history-powershell/).
-
-Thank you to Den Delimarsky for publishing the concise original function that searches the PSReadLine history file and for the `hmm` naming idea. This project expands that concept with deduplication, multiline command reconstruction, pagination, interactive numbered selection, and editable command recall.
+`hmm-history` is an independent implementation inspired by the original idea and the memorable `hmm` function name from Den Delimarsky's article, [Find a command in PowerShell history](https://den.dev/blog/find-command-history-powershell/). It expands the concept with deduplication, multiline command reconstruction, pagination, interactive numbered selection, and editable command recall.
 
 ## License
 
