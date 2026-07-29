@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bash:
+    name: Bash - ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Debian 12, image: 'debian:12', family: apt}
+          - {name: Debian 13, image: 'debian:13', family: apt}
+          - {name: Ubuntu 22.04, image: 'ubuntu:22.04', family: apt}
+          - {name: Ubuntu 24.04, image: 'ubuntu:24.04', family: apt}
+          - {name: Ubuntu 26.04, image: 'ubuntu:26.04', family: apt}
+          - {name: Fedora 42, image: 'fedora:42', family: dnf}
+          - {name: Fedora 43, image: 'fedora:43', family: dnf}
+          - {name: Fedora 44, image: 'fedora:44', family: dnf}
+          - {name: AlmaLinux 8, image: 'almalinux:8', family: rhel}
+          - {name: AlmaLinux 9, image: 'almalinux:9', family: rhel}
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install test tools (APT)
+        if: matrix.family == 'apt'
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates git shellcheck util-linux
+      - name: Install test tools (DNF)
+        if: matrix.family == 'dnf'
+        run: dnf install -y bash ca-certificates git ShellCheck util-linux
+      - name: Install test tools (RHEL-compatible)
+        if: matrix.family == 'rhel'
+        run: dnf install -y epel-release && dnf install -y bash ca-certificates git ShellCheck util-linux
+      - uses: actions/checkout@v4
+      - name: Check Bash version
+        shell: bash
+        run: |
+          bash --version | head -n 1
+          ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))
+      - name: ShellCheck
+        shell: bash
+        run: shellcheck hmm.bash install.sh tests/bash/test_logic.sh tests/bash/test_install.sh tests/bash/test_bindings.sh tests/interactive/test_bash.sh
+      - name: Deterministic Bash tests
+        shell: bash
+        run: |
+          bash tests/bash/test_logic.sh
+          bash tests/bash/test_install.sh
+          bash tests/bash/test_bindings.sh
+      - name: Interactive PTY test
+        shell: bash
+        run: timeout 30s bash tests/interactive/test_bash.sh
+
+  powershell:
+    name: PowerShell - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versions
+        shell: pwsh
+        run: |
+          $PSVersionTable
+          Get-Module PSReadLine -ListAvailable | Select-Object Name, Version, Path
+      - name: Parser check
+        shell: pwsh
+        run: |
+          $allErrors = foreach ($file in './hmm.ps1', './install.ps1', './tests/powershell/Test-Hmm.ps1', './tests/powershell/Test-Install.ps1') {
+            $tokens = $null; $fileErrors = $null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$fileErrors) | Out-Null
+            $fileErrors
+          }
+          if ($allErrors) { $allErrors | Format-List -Force; throw 'PowerShell parser errors found' }
+      - name: Deterministic PowerShell tests
+        shell: pwsh
+        run: |
+          ./tests/powershell/Test-Hmm.ps1
+          ./tests/powershell/Test-Install.ps1

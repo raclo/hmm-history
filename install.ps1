@@ -1,79 +1,67 @@
 #Requires -Version 7.0
 
 [CmdletBinding()]
-param (
+param(
     [string]$InstallDirectory = (Join-Path $HOME '.hmm-history'),
-    [switch]$Force
+    [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost,
+    [switch]$Force,
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
-
 $sourceScript = Join-Path $PSScriptRoot 'hmm.ps1'
 $targetScript = Join-Path $InstallDirectory 'hmm.ps1'
-$profilePath = $PROFILE.CurrentUserCurrentHost
+$profilePath = $ProfilePath
 $profileDirectory = Split-Path -Parent $profilePath
-$escapedTargetScript = $targetScript.Replace('`', '``')
-$escapedTargetScript = $escapedTargetScript.Replace('$', '`$')
-$escapedTargetScript = $escapedTargetScript.Replace('"', '`"')
-$dotSourceLine = '. "{0}"' -f $escapedTargetScript
+$startMarker = '# >>> hmm-history >>>'
+$endMarker = '# <<< hmm-history <<<'
 
-if (-not (Test-Path -LiteralPath $sourceScript)) {
+function Remove-HmmProfileBlock {
+    param([string]$Content)
+    $pattern = '(?ms)^' + [regex]::Escape($startMarker) + '.*?^' + [regex]::Escape($endMarker) + '\s*(?:\r?\n)?'
+    return [regex]::Replace($Content, $pattern, '')
+}
+
+if ($Uninstall) {
+    if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+        $old = Get-Content -Raw -LiteralPath $profilePath
+        $new = Remove-HmmProfileBlock $old
+        if ($new -ne $old) { [IO.File]::WriteAllText($profilePath, $new) }
+    }
+    if (Test-Path -LiteralPath $targetScript -PathType Leaf) {
+        Remove-Item -LiteralPath $targetScript -Force
+    }
+    if ((Test-Path -LiteralPath $InstallDirectory -PathType Container) -and -not (Get-ChildItem -LiteralPath $InstallDirectory -Force)) {
+        Remove-Item -LiteralPath $InstallDirectory
+    }
+    Write-Host 'hmm-history removed. Restart PowerShell to discard the loaded key handler.' -ForegroundColor Green
+    return
+}
+
+if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
     throw "hmm.ps1 was not found next to install.ps1: $sourceScript"
 }
-
-if (-not (Test-Path -LiteralPath $InstallDirectory)) {
-    New-Item -ItemType Directory -Path $InstallDirectory -Force | Out-Null
-}
-
-if ((Test-Path -LiteralPath $targetScript) -and -not $Force) {
-    throw "The target file already exists: $targetScript. Run again with -Force to replace it."
-}
-
+New-Item -ItemType Directory -Path $InstallDirectory -Force | Out-Null
+# Re-running the installer is an update. -Force remains accepted for backward compatibility.
 Copy-Item -LiteralPath $sourceScript -Destination $targetScript -Force
+New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
+if (-not (Test-Path -LiteralPath $profilePath)) { New-Item -ItemType File -Path $profilePath -Force | Out-Null }
 
-if (-not (Test-Path -LiteralPath $profileDirectory)) {
-    New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
-}
-
-$profileCreated = -not (Test-Path -LiteralPath $profilePath)
-
-if ($profileCreated) {
-    New-Item -ItemType File -Path $profilePath -Force | Out-Null
-}
-
-$profileContent = Get-Content -LiteralPath $profilePath -Raw
-
-if ($null -eq $profileContent -or $profileContent -notmatch [regex]::Escape($dotSourceLine)) {
-    $block = @"
-
-# hmm-history
-$dotSourceLine
+$profileContent = Get-Content -Raw -LiteralPath $profilePath
+$profileContent = Remove-HmmProfileBlock ([string]$profileContent)
+$escaped = $targetScript.Replace("'", "''")
+$block = @"
+$startMarker
+if (Test-Path -LiteralPath '$escaped') { . '$escaped' }
+$endMarker
 "@
-
-    Add-Content -LiteralPath $profilePath -Value $block
-    $profileChanged = $true
+if ($profileContent.Length -and -not $profileContent.EndsWith([Environment]::NewLine)) {
+    $profileContent += [Environment]::NewLine
 }
-else {
-    $profileChanged = $false
-}
+[IO.File]::WriteAllText($profilePath, $profileContent + $block + [Environment]::NewLine)
 
-Write-Host ''
 Write-Host 'hmm-history installed.' -ForegroundColor Green
 Write-Host "Script:  $targetScript"
 Write-Host "Profile: $profilePath"
-
-if ($profileChanged) {
-    if ($profileCreated) {
-        Write-Host 'The PowerShell profile was created and configured.' -ForegroundColor Cyan
-    }
-    else {
-        Write-Host 'The PowerShell profile was updated.' -ForegroundColor Cyan
-    }
-}
-else {
-    Write-Host 'The profile already contained the required dot-source line.' -ForegroundColor DarkGray
-}
-
-Write-Host ''
-Write-Host 'Reload the profile with:'
-Write-Host '. $PROFILE' -ForegroundColor Yellow
+Write-Host 'Reload with: . $PROFILE' -ForegroundColor Yellow
+Write-Host 'Uninstall with: ./install.ps1 -Uninstall' -ForegroundColor DarkGray
