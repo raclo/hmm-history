@@ -27,7 +27,10 @@ expect_empty_prompt
 
 send -- "hmm EXECUTED\r"
 expect -glob "Number = recall, Enter = *, P = previous, Q = quit: "
-send -- "\003"
+# Ctrl+C is SIGINT. Sending the signal to the foreground Bash process is stable
+# even with the older Expect/PTY stack in RHEL-compatible 8 containers, which
+# does not translate a sent 0x03 byte through the terminal driver.
+exec kill -INT [exp_pid]
 expect_empty_prompt
 
 # The token can only be printed if Ctrl+C closed the selector and left an empty
