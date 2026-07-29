@@ -31,13 +31,13 @@ jobs:
     steps:
       - name: Install test tools (APT)
         if: matrix.family == 'apt'
-        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates git shellcheck util-linux
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates expect git shellcheck util-linux
       - name: Install test tools (DNF)
         if: matrix.family == 'dnf'
-        run: dnf install -y bash ca-certificates git ShellCheck util-linux-script
+        run: dnf install -y bash ca-certificates expect git ShellCheck util-linux-script
       - name: Install test tools (RHEL-compatible)
         if: matrix.family == 'rhel'
-        run: dnf install -y epel-release && dnf install -y bash ca-certificates git ShellCheck util-linux
+        run: dnf install -y epel-release && dnf install -y bash ca-certificates expect git ShellCheck util-linux
       - uses: actions/checkout@v7
       - name: Check Bash version
         shell: bash

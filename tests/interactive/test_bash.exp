@@ -1,0 +1,69 @@
+#!/usr/bin/expect -f
+
+set timeout 10
+set marker $env(HMM_TEST_MARKER)
+set history_file $env(HMM_TEST_HISTORY_FILE)
+set source_command $env(HMM_TEST_SOURCE_COMMAND)
+log_file -noappend $env(HMM_TEST_TRANSCRIPT)
+
+proc fail {message} {
+    puts stderr $message
+    exit 1
+}
+
+proc expect_empty_prompt {} {
+    expect -re {HMM_PROMPT> $}
+}
+
+spawn env HISTFILE=$history_file HMM_PAGE_SIZE=5 bash -c {stty rows 24 columns 120; exec bash --noprofile --rcfile "$1" -i} hmm-pty $env(HMM_TEST_BASH_RC)
+expect_before timeout { fail "Timed out waiting for the interactive Bash PTY" }
+expect -exact "HMM_PROMPT> "
+send -- "$source_command\r"
+send -- "printf '<%s>\\n' SOURCE_READY\r"
+expect -exact "<SOURCE_READY>"
+expect_empty_prompt
+
+# Recall into Readline, prove that it did not execute, edit the live buffer,
+# then execute it with the second Enter.
+send -- "hmm EXECUTED\r"
+expect -glob "Number = recall, Enter = *, P = previous, Q = quit: "
+send -- "1\r"
+expect -exact "HMM_PROMPT> printf EXECUTED > $marker"
+if {[file exists $marker]} {
+    fail "Selected command executed during recall"
+}
+after 200
+send -- " && printf EDITED >> $marker\r"
+after 300
+set edit_ready "$marker.ready"
+send -- "printf READY > $edit_ready\r"
+for {set attempt 0} {$attempt < 100 && ![file exists $edit_ready]} {incr attempt} {
+    after 50
+}
+if {![file exists $edit_ready]} {
+    fail "The edited command did not return control to Bash"
+}
+expect_empty_prompt
+if {![file exists $marker]} {
+    fail "Edited recalled command did not execute after the second Enter"
+}
+set marker_handle [open $marker r]
+set marker_value [read $marker_handle]
+close $marker_handle
+if {$marker_value ne "EXECUTEDEDITED"} {
+    fail "Recalled command was not edited in the real Readline buffer: <$marker_value>"
+}
+
+# Each cancellation must produce a fresh, empty prompt below the selector.
+foreach cancel_key {q "\033" "\003"} {
+    send -- "hmm EXECUTED\r"
+    expect -glob "Number = recall, Enter = *, P = previous, Q = quit: "
+    send -- $cancel_key
+    expect_empty_prompt
+}
+
+send -- "printf NORMAL_ENTER\r"
+expect -exact "NORMAL_ENTER"
+expect_empty_prompt
+send -- "exit\r"
+expect eof
