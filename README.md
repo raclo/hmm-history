@@ -26,18 +26,19 @@ PowerShell requires PowerShell 7 or later, PSReadLine, and an interactive consol
 
 Bash requires Bash 4.4 or later built with GNU Readline, an interactive TTY session, and standard utilities normally present on supported distributions (`mktemp` and `rm`; the installer also uses `awk` and `cp`). The Bash 3.2 shipped by default on many macOS releases is unsupported; install a current Bash before using `hmm.bash` there.
 
-“Tested” means the automated job or a documented manual test actually completed. “Expected” means the implementation is designed for the platform but has not yet produced test evidence in this checkout.
+“Tested” means the automated job or a documented manual test actually completed. “Expected” means the implementation is designed for the platform but has not yet produced test evidence in this checkout. The CI results below refer to GitHub Actions run `30455806726`.
 
 | Platform | Implementation | Status in this checkout |
 |---|---|---|
-| Windows, PowerShell 7.6.4 / PSReadLine 2.4.5 | PowerShell | Deterministic tests run locally; interactive recall still needs manual verification |
-| Debian 13 under WSL2, Bash 5.2.37 | Bash | ShellCheck 0.10.0, syntax, logic, installer, binding restoration, and real PTY recall tests passed locally |
+| Windows, PowerShell 7.6.4 / PSReadLine 2.4.5 | PowerShell | Deterministic tests and manual editable recall without execution passed locally |
+| Debian 13 under WSL2, Bash 5.2.37 | Bash | ShellCheck 0.10.0, syntax, logic, installer, binding restoration, and real `script`/Expect PTY tests passed locally |
 | Windows, Git for Windows Bash 5.2.37 | Bash | Syntax, logic, and installer checks passed locally; this is not a supported Linux/TTY result |
-| `windows-latest`, `ubuntu-latest`, `macos-latest` | PowerShell | CI configured; not yet claimed as tested |
-| Debian 12, Debian 13 | Bash | Container CI configured; not yet claimed as tested |
-| Ubuntu 22.04, 24.04, 26.04 | Bash | Container CI configured; not yet claimed as tested |
-| Fedora 42, 43, 44 | Bash | Container CI configured; not yet claimed as tested |
-| AlmaLinux 8, 9 | Bash | Container CI configured; not yet claimed as tested |
+| `windows-latest`, `ubuntu-latest`, `macos-latest` | PowerShell | CI parser and deterministic tests passed |
+| Debian 12, Debian 13 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
+| Ubuntu 22.04, 24.04, 26.04 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
+| Fedora 42, 43, 44 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
+| AlmaLinux 9 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
+| AlmaLinux 8 | Bash | CI ShellCheck, deterministic tests, binding restoration, and recall PTY passed; the Expect Ctrl+C subtest was explicitly skipped because its older PTY stack does not forward the control byte reliably |
 | macOS system Bash 3.2 | Bash | Unsupported |
 | Non-interactive shells or hosts without an editing TTY | Both | Unsupported for selection/recall |
 
@@ -175,7 +176,7 @@ bash tests/interactive/test_bash.sh
 ./tests/powershell/Test-Install.ps1
 ```
 
-The interactive test uses util-linux `script(1)` to start Bash under a real pseudo-terminal. It recalls a command that creates a marker file, proves the file does not exist while the command is only in the editing buffer, edits the buffer, then executes it. Its transcript also verifies that the recalled prompt is below the selector and exercises `Q`, Escape, Ctrl+C, and ordinary Enter behavior. A missing `script(1)` exits with status 77 and is never reported as a pass.
+The interactive test uses util-linux `script(1)` and Expect to start Bash under real pseudo-terminals. The `script(1)` session recalls a command that creates a marker file, proves the file does not exist while the command is only in the editing buffer, edits the buffer, then executes it. Its transcript also verifies that the recalled prompt is below the selector and exercises `Q`, Escape, and ordinary Enter behavior. Expect separately sends Ctrl+C and proves that a clean command executes afterward. Missing development tools exit with status 77 and are never reported as a pass. The Expect Ctrl+C subtest is explicitly skipped on AlmaLinux 8; its full recall PTY test still runs and passes.
 
 The CI workflow defines all distribution and OS jobs listed in the status table, prints Bash versions, asserts Bash 4.4+, runs ShellCheck and deterministic tests, and runs the Bash PTY test. PowerShell jobs perform parser and deterministic tests on all three practical GitHub-hosted operating systems.
 
