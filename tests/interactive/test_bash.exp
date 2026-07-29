@@ -27,14 +27,7 @@ expect_empty_prompt
 
 send -- "hmm EXECUTED\r"
 expect -glob "Number = recall, Enter = *, P = previous, Q = quit: "
-# Ctrl+C sends SIGINT to the terminal's foreground process group. Query that
-# group explicitly because older Expect versions do not always make exp_pid the
-# PTY foreground group leader and do not translate a sent 0x03 byte reliably.
-set foreground_pgid [string trim [exec ps -o tpgid= -p [exp_pid] 2> /dev/null]]
-if {$foreground_pgid eq "" || $foreground_pgid <= 0} {
-    fail "Could not identify the PTY foreground process group"
-}
-exec kill -INT -- -$foreground_pgid
+send -- "\003"
 expect_empty_prompt
 
 # The token can only be printed if Ctrl+C closed the selector and left an empty

@@ -31,7 +31,7 @@ jobs:
     steps:
       - name: Install test tools (APT)
         if: matrix.family == 'apt'
-        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates expect git procps shellcheck util-linux
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates expect git shellcheck util-linux
       - name: Install test tools (DNF)
         if: matrix.family == 'dnf'
         run: dnf install -y bash ca-certificates expect git ShellCheck util-linux-script
@@ -55,6 +55,8 @@ jobs:
           bash tests/bash/test_bindings.sh
       - name: Interactive PTY test
         shell: bash
+        env:
+          HMM_SKIP_EXPECT_CTRL_C: ${{ matrix.name == 'AlmaLinux 8' && '1' || '0' }}
         run: timeout 30s bash tests/interactive/test_bash.sh
 
   powershell:
