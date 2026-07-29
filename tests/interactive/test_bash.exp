@@ -14,7 +14,7 @@ proc expect_empty_prompt {} {
     expect -re {HMM_PROMPT> $}
 }
 
-spawn env HISTFILE=$history_file HMM_PAGE_SIZE=5 bash -c {stty rows 24 columns 120; exec bash --noprofile --rcfile "$1" -i} hmm-pty $env(HMM_TEST_BASH_RC)
+spawn env HISTFILE=$history_file HMM_PAGE_SIZE=5 bash -c {stty rows 24 columns 120; exec "$1" --noprofile --rcfile "$2" -i} hmm-pty $env(HMM_TEST_BASH_PATH) $env(HMM_TEST_BASH_RC)
 expect_before timeout { fail "Timed out waiting for the interactive Bash PTY" }
 expect -exact "HMM_PROMPT> "
 

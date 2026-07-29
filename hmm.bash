@@ -28,6 +28,9 @@ declare -g _HMM_SAVED_DISPATCH_BINDING=''
 declare -g _HMM_SAVED_DISPATCH_KIND='none'
 declare -g _HMM_SAVED_ACCEPT_BINDING=''
 declare -g _HMM_SAVED_ACCEPT_KIND='none'
+declare -g _HMM_SAVED_SUBMIT_BINDING=''
+declare -g _HMM_SAVED_SUBMIT_KIND='none'
+declare -g _HMM_ACCEPT_GATE_DISABLED=0
 
 _hmm_parse_history_file() {
     local path=$1 output_name=$2 line entry='' timestamped=0
@@ -231,20 +234,22 @@ _hmm_trim_argument() {
     printf '%s' "$value"
 }
 
-_hmm_skip_accept() {
-    # This is the second half of the Enter macro. A handled hmm invocation
-    # replaces the private accept chord for exactly one key sequence.
-    bind '"\C-x\C-^": accept-line'
-}
-
 _hmm_enter_dispatch() {
     local line=$READLINE_LINE argument
+    # Keep the gate a Readline macro at all times. Changing a binding from a
+    # shell command back to a Readline function while bind -x is executing can
+    # corrupt the active keymap on Bash 5.1.
+    if ((_HMM_ACCEPT_GATE_DISABLED)); then
+        bind '"\C-x\C-^":"\C-x\C-_"'
+        _HMM_ACCEPT_GATE_DISABLED=0
+    fi
     if [[ ! $line =~ ^[[:space:]]*hmm([[:space:]]+(.*))?[[:space:]]*$ ]]; then
         return 0
     fi
     # Prevent the Enter macro's final private accept-line chord from submitting
     # the command placed into READLINE_LINE.
-    bind -x '"\C-x\C-^":_hmm_skip_accept'
+    bind '"\C-x\C-^":""'
+    _HMM_ACCEPT_GATE_DISABLED=1
     argument=$(_hmm_trim_argument "${BASH_REMATCH[2]-}")
     READLINE_LINE=''
     READLINE_POINT=0
@@ -336,8 +341,10 @@ hmm_enable() {
     fi
     _hmm_capture_binding '\C-x\C-]' _HMM_SAVED_DISPATCH_BINDING _HMM_SAVED_DISPATCH_KIND
     _hmm_capture_binding '\C-x\C-^' _HMM_SAVED_ACCEPT_BINDING _HMM_SAVED_ACCEPT_KIND
+    _hmm_capture_binding '\C-x\C-_' _HMM_SAVED_SUBMIT_BINDING _HMM_SAVED_SUBMIT_KIND
     bind -x '"\C-x\C-]":_hmm_enter_dispatch'
-    bind '"\C-x\C-^": accept-line'
+    bind '"\C-x\C-_": accept-line'
+    bind '"\C-x\C-^":"\C-x\C-_"'
     # Enter expands to dispatch followed by a private accept-line chord. The
     # dispatcher suppresses that second chord only for exact hmm invocations.
     bind '"\C-m":"\C-x\C-]\C-x\C-^"'
@@ -349,6 +356,8 @@ hmm_disable() {
     _hmm_restore_binding '\C-m' "$_HMM_SAVED_ENTER_KIND" "$_HMM_SAVED_ENTER_BINDING"
     _hmm_restore_binding '\C-x\C-]' "$_HMM_SAVED_DISPATCH_KIND" "$_HMM_SAVED_DISPATCH_BINDING"
     _hmm_restore_binding '\C-x\C-^' "$_HMM_SAVED_ACCEPT_KIND" "$_HMM_SAVED_ACCEPT_BINDING"
+    _hmm_restore_binding '\C-x\C-_' "$_HMM_SAVED_SUBMIT_KIND" "$_HMM_SAVED_SUBMIT_BINDING"
+    _HMM_ACCEPT_GATE_DISABLED=0
     _HMM_BINDING_ENABLED=0
 }
 

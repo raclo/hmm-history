@@ -35,6 +35,7 @@ assert_contains() {
 bind -x '"\C-m":printf enter-probe >/dev/null'
 bind -x '"\C-x\C-]":printf dispatch-probe >/dev/null'
 bind '"\C-x\C-^":"accept-probe"'
+bind '"\C-x\C-_":"submit-probe"'
 
 if hmm_enable 2>/dev/null; then
     printf 'FAIL: custom Enter bind -x handler was replaced without opt-in\n' >&2
@@ -50,15 +51,19 @@ hmm_disable
 enter_binding=''; enter_kind=''
 dispatch_binding=''; dispatch_kind=''
 accept_binding=''; accept_kind=''
+submit_binding=''; submit_kind=''
 _hmm_capture_binding '\C-m' enter_binding enter_kind
 _hmm_capture_binding '\C-x\C-]' dispatch_binding dispatch_kind
 _hmm_capture_binding '\C-x\C-^' accept_binding accept_kind
+_hmm_capture_binding '\C-x\C-_' submit_binding submit_kind
 assert_contains "$enter_kind" 'shell' 'Enter binding kind restoration'
 assert_contains "$dispatch_kind" 'shell' 'private binding kind restoration'
 assert_contains "$accept_kind" 'readline' 'private macro kind restoration'
+assert_contains "$submit_kind" 'readline' 'private submit kind restoration'
 assert_contains "$enter_binding" 'enter-probe' 'Enter bind -x restoration'
 assert_contains "$dispatch_binding" 'dispatch-probe' 'private bind -x restoration'
 assert_contains "$accept_binding" 'accept-probe' 'private macro restoration'
+assert_contains "$submit_binding" 'submit-probe' 'private submit restoration'
 
 if ((failures)); then
     printf '%d Bash binding test(s) failed\n' "$failures" >&2

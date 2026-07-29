@@ -23,7 +23,8 @@ trap 'rm -rf -- "$tmp_dir"' EXIT HUP INT TERM
 printf '#1700000000\nprintf EXECUTED > %q\n' "$marker" > "$history_file"
 printf -v source_command 'source %q' "$repo_dir/hmm.bash"
 printf -v history_argument '%q' "$history_file"
-shell_command="env HISTFILE=$history_argument PS1='HMM_PROMPT> ' HMM_PAGE_SIZE=5 bash --noprofile --norc -i"
+printf -v test_bash '%q' "${HMM_TEST_BASH:-bash}"
+shell_command="env HISTFILE=$history_argument PS1='HMM_PROMPT> ' HMM_PAGE_SIZE=5 $test_bash --noprofile --norc -i"
 
 {
     sleep 0.3
@@ -95,6 +96,7 @@ export HMM_TEST_HISTORY_FILE=$history_file
 export HMM_TEST_SOURCE_COMMAND=$source_command
 export HMM_TEST_TRANSCRIPT=$expect_transcript
 export HMM_TEST_BASH_RC=$bash_rc
+export HMM_TEST_BASH_PATH=${HMM_TEST_BASH:-bash}
 if ! expect "$test_dir/test_bash.exp"; then
     printf '%s\n' '--- Expect PTY transcript ---' >&2
     sed -n l "$expect_transcript" >&2
