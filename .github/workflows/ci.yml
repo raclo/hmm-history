@@ -31,7 +31,7 @@ jobs:
     steps:
       - name: Install test tools (APT)
         if: matrix.family == 'apt'
-        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates expect git shellcheck util-linux
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates expect git procps shellcheck util-linux
       - name: Install test tools (DNF)
         if: matrix.family == 'dnf'
         run: dnf install -y bash ca-certificates expect git ShellCheck util-linux-script
