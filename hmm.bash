@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # hmm-history for Bash 4.4+ and GNU Readline. Source this file from an
 # interactive Bash session; do not execute it as a program.
 
@@ -287,21 +288,21 @@ _hmm_capture_binding() {
     value_ref=''
     kind_ref='none'
     while IFS= read -r line; do
-        if [[ $line == "\"${sequence}\":"* ]]; then
+        if [[ $line == "\"${sequence}\":"* || $line == "\"${sequence}\" "* ]]; then
             value_ref=$line
             kind_ref='shell'
             return
         fi
     done < <(bind -X 2>/dev/null)
     while IFS= read -r line; do
-        if [[ $line == "\"${sequence}\":"* ]]; then
+        if [[ $line == "\"${sequence}\":"* || $line == "\"${sequence}\" "* ]]; then
             value_ref=$line
             kind_ref='readline'
             return
         fi
     done < <(bind -s 2>/dev/null)
     while IFS= read -r line; do
-        if [[ $line == "\"${sequence}\":"* ]]; then
+        if [[ $line == "\"${sequence}\":"* || $line == "\"${sequence}\" "* ]]; then
             # Output is returned through namerefs.
             # shellcheck disable=SC2034
             value_ref=$line

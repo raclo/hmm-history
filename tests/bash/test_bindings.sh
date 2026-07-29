@@ -7,15 +7,18 @@ if [[ $- != *i* || ! -t 0 ]]; then
         exit 1
     }
     printf -v self_path '%q' "${BASH_SOURCE[0]}"
+    printf -v test_bash '%q' "${HMM_TEST_BASH:-bash}"
     # The child interactive shell, not this wrapper, expands the status values.
     # shellcheck disable=SC2016
     printf 'source %s; test_status=$?; exit $test_status\r' "$self_path" |
-        script -qefc "env PS1='HMM_BINDING_TEST> ' bash --noprofile --norc -i" /dev/null
+        script -qefc "env PS1='HMM_BINDING_TEST> ' $test_bash --noprofile --norc -i" /dev/null
     exit $?
 fi
 
 test_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(cd -- "$test_dir/../.." && pwd)
+# Read after sourcing by hmm.bash.
+# shellcheck disable=SC2034
 HMM_NO_AUTO_ENABLE=1
 # shellcheck disable=SC1090
 source "$repo_dir/hmm.bash"
@@ -38,13 +41,21 @@ if hmm_enable 2>/dev/null; then
     ((failures++))
 fi
 
+# Read by hmm_enable in the sourced file.
+# shellcheck disable=SC2034
 HMM_FORCE_BINDING=1
 hmm_enable
 hmm_disable
 
-enter_binding=$(bind -X 2>/dev/null | grep -F '"\C-m":' || :)
-dispatch_binding=$(bind -X 2>/dev/null | grep -F '"\C-x\C-]":' || :)
-accept_binding=$(bind -s 2>/dev/null | grep -F '"\C-x\C-^":' || :)
+enter_binding=''; enter_kind=''
+dispatch_binding=''; dispatch_kind=''
+accept_binding=''; accept_kind=''
+_hmm_capture_binding '\C-m' enter_binding enter_kind
+_hmm_capture_binding '\C-x\C-]' dispatch_binding dispatch_kind
+_hmm_capture_binding '\C-x\C-^' accept_binding accept_kind
+assert_contains "$enter_kind" 'shell' 'Enter binding kind restoration'
+assert_contains "$dispatch_kind" 'shell' 'private binding kind restoration'
+assert_contains "$accept_kind" 'readline' 'private macro kind restoration'
 assert_contains "$enter_binding" 'enter-probe' 'Enter bind -x restoration'
 assert_contains "$dispatch_binding" 'dispatch-probe' 'private bind -x restoration'
 assert_contains "$accept_binding" 'accept-probe' 'private macro restoration'

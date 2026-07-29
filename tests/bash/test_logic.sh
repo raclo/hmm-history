@@ -3,6 +3,8 @@ set -uo pipefail
 
 test_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(cd -- "$test_dir/../.." && pwd)
+# Read after sourcing by hmm.bash.
+# shellcheck disable=SC2034
 HMM_NO_AUTO_ENABLE=1
 # The path is calculated at runtime so the test also works outside the repo root.
 # shellcheck disable=SC1090
@@ -75,6 +77,8 @@ _hmm_search_entries CURRENT_SESSION_ONLY 0 snapshot results
 assert_eq 'printf CURRENT_SESSION_ONLY' "${results[0]}" 'current session works with HISTFILE unset'
 set +o history
 
+# Read through a nameref in _hmm_recall_number.
+# shellcheck disable=SC2034
 HMM_LAST_RESULTS=('one' 'two')
 recalled=''
 _hmm_recall_number 2 recalled; assert_eq 'two' "$recalled" 'valid direct recall'
