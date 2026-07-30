@@ -32,6 +32,8 @@ Bash requires Bash 4.4 or later built with GNU Readline, an interactive TTY sess
 |---|---|---|
 | Windows, PowerShell 7.6.4 / PSReadLine 2.4.5 | PowerShell | Deterministic tests and manual editable recall without execution passed locally |
 | Debian 13 under WSL2, Bash 5.2.37 | Bash | ShellCheck 0.10.0, syntax, logic, installer, binding restoration, and real `script`/Expect PTY tests passed locally |
+| Debian 13.6 on physical hardware | Bash | Per-user installation and manual editable recall without execution passed |
+| QNAP QTS, x86_64, Entware Bash 5.3.9 | Bash | Manual installation, search, pagination, previous-page navigation, and editable recall passed; the QTS system Bash 3.2 remains unsupported |
 | Windows, Git for Windows Bash 5.2.37 | Bash | Syntax, logic, and installer checks passed locally; this is not a supported Linux/TTY result |
 | `windows-latest`, `ubuntu-latest`, `macos-latest` | PowerShell | CI parser and deterministic tests passed |
 | Debian 12, Debian 13 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
@@ -92,6 +94,38 @@ Manual installation is simply:
 ```bash
 source /path/to/hmm.bash
 ```
+
+### QNAP QTS with Entware
+
+QTS may use `/bin/sh` as the login shell and ship `/bin/bash` 3.2. Neither is sufficient for `hmm.bash`. On a QNAP system with Entware, install and use Entware's current Bash without replacing either system shell:
+
+```sh
+/opt/bin/opkg update
+/opt/bin/opkg install bash
+/opt/bin/bash --version | head -n 1
+```
+
+After confirming Bash 4.4 or later, run `sh ./install.sh` from the repository. The installer adds its managed block to the current user's `~/.bashrc`; start Entware Bash explicitly with `/opt/bin/bash` to load it. Installation is per user and searches only that user's Bash history.
+
+After explicit startup has been tested successfully, an interactive QTS login can enter Entware Bash automatically by placing this guarded block in the user's persistent `~/.profile`:
+
+```sh
+if [ -z "${BASH_VERSION:-}" ] && [ -t 0 ] && [ -t 1 ] && [ -x /opt/bin/bash ]; then
+    exec /opt/bin/bash
+fi
+```
+
+The TTY checks avoid replacing the shell for non-interactive SSH commands and file-transfer sessions. If Entware has not started and `/opt/bin/bash` is unavailable, the login remains in the QTS system shell. Test a second SSH session before closing the first one; do not replace `/bin/sh`, `/bin/bash`, or the QTS account shell globally.
+
+An Entware Bash prompt containing `I have no name!` means its user lookup cannot map the current numeric UID to an account name. Compare the system and Entware account databases before changing either one:
+
+```sh
+id
+grep ":$(id -u):" /etc/passwd /opt/etc/passwd 2>/dev/null
+ls -l /opt/etc/passwd
+```
+
+This prompt is cosmetic for `hmm`, but the account database should not be edited or copied blindly. As a temporary prompt-only workaround, obtain the QTS user name before starting Bash and configure `PS1` without Bash's `\u` escape.
 
 ## Usage
 
