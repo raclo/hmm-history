@@ -10,3 +10,6 @@
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Private machine-specific notes
+/QNAP_PRIVATE.md
