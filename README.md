@@ -26,14 +26,14 @@ PowerShell requires PowerShell 7 or later, PSReadLine, and an interactive consol
 
 Bash requires Bash 4.4 or later built with GNU Readline, an interactive TTY session, and standard utilities normally present on supported distributions (`mktemp` and `rm`; the installer also uses `awk` and `cp`). The Bash 3.2 shipped by default on many macOS releases is unsupported; install a current Bash before using `hmm.bash` there.
 
-“Tested” means the automated job or a documented manual test actually completed. “Expected” means the implementation is designed for the platform but has not yet produced test evidence in this checkout. The CI results below refer to GitHub Actions run `30455806726`.
+“Tested” means the automated job or a documented manual test actually completed. “Expected” means the implementation is designed for the platform but has not yet produced test evidence in this checkout. The CI results below refer to GitHub Actions run `30546897359` on the merged `main` commit.
 
 | Platform | Implementation | Status in this checkout |
 |---|---|---|
 | Windows, PowerShell 7.6.4 / PSReadLine 2.4.5 | PowerShell | Deterministic tests and manual editable recall without execution passed locally |
 | Debian 13 under WSL2, Bash 5.2.37 | Bash | ShellCheck 0.10.0, syntax, logic, installer, binding restoration, and real `script`/Expect PTY tests passed locally |
 | Debian 13.6 on physical hardware | Bash | Per-user installation and manual editable recall without execution passed |
-| QNAP QTS, x86_64, Entware Bash 5.3.9 | Bash | Manual installation, search, pagination, previous-page navigation, and editable recall passed; the QTS system Bash 3.2 remains unsupported |
+| QNAP QTS, x86_64, Entware Bash 5.3.9 | Bash | Manual installation, search, pagination, previous-page navigation, editable recall, non-interactive SSH isolation, automatic Bash entry, and post-reboot persistence passed; the QTS system Bash 3.2 remains unsupported |
 | Windows, Git for Windows Bash 5.2.37 | Bash | Syntax, logic, and installer checks passed locally; this is not a supported Linux/TTY result |
 | `windows-latest`, `ubuntu-latest`, `macos-latest` | PowerShell | CI parser and deterministic tests passed |
 | Debian 12, Debian 13 | Bash | CI ShellCheck, deterministic tests, binding restoration, recall PTY, and Expect Ctrl+C tests passed |
@@ -97,7 +97,7 @@ source /path/to/hmm.bash
 
 ### QNAP QTS with Entware
 
-QTS may use `/bin/sh` as the login shell and ship `/bin/bash` 3.2. Neither is sufficient for `hmm.bash`. On a QNAP system with Entware, install and use Entware's current Bash without replacing either system shell:
+QTS may use `/bin/sh` as the login shell while implementing it with its Bash 3.2 build in `sh` mode. Neither that shell nor `/bin/bash` 3.2 is sufficient for `hmm.bash`. On a QNAP system with Entware, install and use Entware's current Bash without replacing either system shell:
 
 ```sh
 /opt/bin/opkg update
@@ -110,12 +110,12 @@ After confirming Bash 4.4 or later, run `sh ./install.sh` from the repository. T
 After explicit startup has been tested successfully, an interactive QTS login can enter Entware Bash automatically by placing this guarded block in the user's persistent `~/.profile`:
 
 ```sh
-if [ -z "${BASH_VERSION:-}" ] && [ -t 0 ] && [ -t 1 ] && [ -x /opt/bin/bash ]; then
+if [ -t 0 ] && [ -t 1 ] && [ -x /opt/bin/bash ] && [ "${BASH:-}" != /opt/bin/bash ]; then
     exec /opt/bin/bash
 fi
 ```
 
-The TTY checks avoid replacing the shell for non-interactive SSH commands and file-transfer sessions. If Entware has not started and `/opt/bin/bash` is unavailable, the login remains in the QTS system shell. Test a second SSH session before closing the first one; do not replace `/bin/sh`, `/bin/bash`, or the QTS account shell globally.
+The TTY checks avoid replacing the shell for non-interactive SSH commands and file-transfer sessions. Comparing `$BASH` with the Entware path prevents recursion and handles QTS `/bin/sh`, which may set `BASH_VERSION` even though it is the unsupported 3.2 build. If Entware has not started and `/opt/bin/bash` is unavailable, the login remains in the QTS system shell. Test a second SSH session before closing the first one; do not replace `/bin/sh`, `/bin/bash`, or the QTS account shell globally.
 
 An Entware Bash prompt containing `I have no name!` means its user lookup cannot map the current numeric UID to an account name. Compare the system and Entware account databases before changing either one:
 
@@ -125,7 +125,13 @@ grep ":$(id -u):" /etc/passwd /opt/etc/passwd 2>/dev/null
 ls -l /opt/etc/passwd
 ```
 
-This prompt is cosmetic for `hmm`, but the account database should not be edited or copied blindly. As a temporary prompt-only workaround, obtain the QTS user name before starting Bash and configure `PS1` without Bash's `\u` escape.
+This prompt is cosmetic for `hmm`, but the account database should not be edited or copied blindly. If command-line identity tools resolve the user but Bash's `\u` escape still does not, use the existing `$USER` value in the interactive Bash prompt instead:
+
+```bash
+if [[ $- == *i* ]]; then
+    PS1="[$USER@\h \W]\\$ "
+fi
+```
 
 ## Usage
 
