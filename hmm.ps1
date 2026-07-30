@@ -2,293 +2,208 @@
 
 <#
 .SYNOPSIS
-    Interactive, numbered search for the persistent PSReadLine history.
-
-.DESCRIPTION
-    Searches commands stored in the PSReadLine history file, displays recent
-    matching commands in numbered pages, and recalls the selected command into
-    the editable PowerShell prompt without executing it.
-
-    Usage:
-        hmm route
-        hmm "Microsoft PowerShell"
-        hmm 9
-
-    Interactive controls:
-        Number  Recall a result without executing it
-        Enter   Next page, or close on the final page
-        P       Previous page
-        Q/Esc   Quit
-        Ctrl+C  Cancel
+    Search PSReadLine history and recall a command without executing it.
 #>
 
 Import-Module PSReadLine -ErrorAction Stop
 
-# Prefix-based history navigation using the text already entered.
-Set-PSReadLineKeyHandler -Chord UpArrow -Function HistorySearchBackward
-Set-PSReadLineKeyHandler -Chord DownArrow -Function HistorySearchForward
-Set-PSReadLineOption -HistorySearchCursorMovesToEnd
-
-# User configuration.
-$global:HmmPageSize = 15
-$global:HmmKeepDuplicates = $false
-$global:HmmShowFullCommands = $false
-
-# State for direct recall through: hmm <number>
+# Set these before dot-sourcing to override the defaults.
+if ($null -eq $global:HmmPageSize) { $global:HmmPageSize = 15 }
+if ($null -eq $global:HmmKeepDuplicates) { $global:HmmKeepDuplicates = $false }
+if ($null -eq $global:HmmShowFullCommands) { $global:HmmShowFullCommands = $false }
 $global:HmmLastSearch = $null
 $global:HmmLastResults = @()
+if ($null -eq $global:HmmBindingEnabled) { $global:HmmBindingEnabled = $false }
 
 function global:Get-HmmHistoryEntries {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Path
-    )
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
 
     $entries = [System.Collections.Generic.List[string]]::new()
     $current = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($line in [System.IO.File]::ReadLines($Path)) {
-        $current.Add($line)
-
-        # PSReadLine normally stores intermediate lines of a multiline command
-        # with a trailing backtick.
-        if (-not $line.EndsWith('`')) {
-            $entries.Add(($current -join [Environment]::NewLine))
-            $current.Clear()
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($Path)) {
+            $current.Add($line)
+            # PSReadLine marks continued physical lines with a trailing backtick.
+            if (-not $line.EndsWith('`')) {
+                $entries.Add(($current -join [Environment]::NewLine))
+                $current.Clear()
+            }
         }
     }
-
-    if ($current.Count -gt 0) {
-        $entries.Add(($current -join [Environment]::NewLine))
+    catch {
+        Write-Warning "Unable to read PSReadLine history: $($_.Exception.Message)"
+        return @()
     }
-
+    if ($current.Count -gt 0) { $entries.Add(($current -join [Environment]::NewLine)) }
     return $entries.ToArray()
 }
 
 function global:Find-HmmHistory {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Query
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Query,
+        [string]$Path,
+        [switch]$KeepDuplicates
     )
 
-    $historyPath = (Get-PSReadLineOption).HistorySavePath
-
-    if (-not (Test-Path -LiteralPath $historyPath)) {
-        Write-Host ''
-        Write-Host 'PSReadLine history file not found:' -ForegroundColor Yellow
-        Write-Host $historyPath -ForegroundColor DarkGray
-        return @()
+    if (-not $PSBoundParameters.ContainsKey('Path')) {
+        $Path = (Get-PSReadLineOption).HistorySavePath
     }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
 
-    $historyEntries = @(Get-HmmHistoryEntries -Path $historyPath)
+    $entries = @(Get-HmmHistoryEntries -Path $Path)
     $results = [System.Collections.Generic.List[string]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
     )
+    $preserveDuplicates = $KeepDuplicates -or $global:HmmKeepDuplicates
 
-    # Newest commands first.
-    for ($i = $historyEntries.Count - 1; $i -ge 0; $i--) {
-        $command = $historyEntries[$i].TrimEnd()
-
-        if ([string]::IsNullOrWhiteSpace($command)) {
-            continue
-        }
-
-        # Exclude searches performed with hmm itself.
-        if ($command -match '^\s*hmm(?:\s|$)') {
-            continue
-        }
-
-        if (
-            $command.IndexOf(
-                $Query,
-                [System.StringComparison]::OrdinalIgnoreCase
-            ) -lt 0
-        ) {
-            continue
-        }
-
-        if ($global:HmmKeepDuplicates -or $seen.Add($command)) {
-            $results.Add($command)
-        }
+    for ($i = $entries.Count - 1; $i -ge 0; $i--) {
+        $command = $entries[$i].TrimEnd("`r", "`n")
+        if ([string]::IsNullOrWhiteSpace($command)) { continue }
+        if ($command -match '^\s*hmm(?:\s|$)') { continue }
+        if ($command.IndexOf($Query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        # Ignore surrounding whitespace for duplicate comparison while keeping
+        # the original newest command unchanged for recall.
+        $dedupeKey = $command.Trim()
+        if ($preserveDuplicates -or $seen.Add($dedupeKey)) { $results.Add($command) }
     }
-
     return $results.ToArray()
 }
 
-function global:Show-HmmPage {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Query,
-
-        [Parameter(Mandatory)]
-        [string[]]$Results,
-
-        [Parameter(Mandatory)]
-        [int]$CurrentPage,
-
-        [Parameter(Mandatory)]
-        [int]$PageSize
+function global:Get-HmmPageRange {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateRange(0, [int]::MaxValue)][int]$ResultCount,
+        [Parameter(Mandatory)][ValidateRange(1, [int]::MaxValue)][int]$PageSize,
+        [Parameter(Mandatory)][ValidateRange(0, [int]::MaxValue)][int]$Page
     )
+    $pages = if ($ResultCount) { [int][Math]::Ceiling($ResultCount / [double]$PageSize) } else { 0 }
+    [pscustomobject]@{
+        TotalPages = $pages
+        Start = [Math]::Min($Page * $PageSize, $ResultCount)
+        EndExclusive = [Math]::Min(($Page + 1) * $PageSize, $ResultCount)
+    }
+}
 
-    $totalResults = $Results.Count
-    $totalPages = [int][Math]::Ceiling($totalResults / [double]$PageSize)
-    $startIndex = $CurrentPage * $PageSize
-    $endIndex = [Math]::Min($startIndex + $PageSize, $totalResults)
-    $numberWidth = $totalResults.ToString().Length
+function global:Resolve-HmmResultNumber {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Value,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Results
+    )
+    if ($Value -notmatch '^\d+$') {
+        return [pscustomobject]@{ IsNumeric = $false; IsValid = $false; Number = 0; Command = $null }
+    }
+    $number = 0
+    $parsed = [int]::TryParse($Value, [ref]$number)
+    $valid = $parsed -and $number -ge 1 -and $number -le $Results.Count
+    [pscustomobject]@{
+        IsNumeric = $true
+        IsValid = $valid
+        Number = $number
+        Command = if ($valid) { [string]$Results[$number - 1] } else { $null }
+    }
+}
 
+function global:Get-HmmConsoleWidth {
     try {
-        $consoleWidth = $Host.UI.RawUI.WindowSize.Width
-    }
-    catch {
-        $consoleWidth = 120
-    }
+        $width = [Console]::WindowWidth
+        if ($width -gt 0) { return $width }
+    } catch {}
+    try {
+        $width = $Host.UI.RawUI.WindowSize.Width
+        if ($width -gt 0) { return $width }
+    } catch {}
+    return 120
+}
 
-    $previewWidth = [Math]::Max(30, $consoleWidth - $numberWidth - 5)
+function global:Show-HmmPage {
+    param(
+        [Parameter(Mandatory)][string]$Query,
+        [Parameter(Mandatory)][string[]]$Results,
+        [Parameter(Mandatory)][int]$CurrentPage,
+        [Parameter(Mandatory)][int]$PageSize
+    )
+    $range = Get-HmmPageRange -ResultCount $Results.Count -PageSize $PageSize -Page $CurrentPage
+    $numberWidth = [Math]::Max(1, $Results.Count.ToString().Length)
+    $previewWidth = [Math]::Max(10, (Get-HmmConsoleWidth) - $numberWidth - 5)
 
     Write-Host ''
-    $header = 'hmm: "{0}" - {1} results - page {2}/{3}' -f `
-        $Query, $totalResults, ($CurrentPage + 1), $totalPages
-    Write-Host $header -ForegroundColor Cyan
+    Write-Host ('hmm: "{0}" - {1} results - page {2}/{3}' -f $Query, $Results.Count, ($CurrentPage + 1), $range.TotalPages) -ForegroundColor Cyan
     Write-Host ''
-
-    for ($i = $startIndex; $i -lt $endIndex; $i++) {
-        $number = $i + 1
+    for ($i = $range.Start; $i -lt $range.EndExclusive; $i++) {
         $preview = $Results[$i] -replace "(`r`n|`n|`r)", '  <line>  '
-
-        if (
-            -not $global:HmmShowFullCommands -and
-            $preview.Length -gt $previewWidth
-        ) {
-            $preview = $preview.Substring(0, $previewWidth - 1) + '...'
+        if (-not $global:HmmShowFullCommands -and $preview.Length -gt $previewWidth) {
+            $preview = $preview.Substring(0, [Math]::Max(1, $previewWidth - 1)) + [char]0x2026
         }
-
-        $lineFormat = '[{0,' + $numberWidth + '}] {1}'
-        $formattedLine = $lineFormat -f $number, $preview
-        Write-Host $formattedLine
+        $format = '[{0,' + $numberWidth + '}] {1}'
+        Write-Host ($format -f ($i + 1), $preview)
     }
 }
 
 function global:Read-HmmSelection {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Query,
-
-        [Parameter(Mandatory)]
-        [string[]]$Results,
-
-        [Parameter(Mandatory)]
-        [int]$PageSize
+    param(
+        [Parameter(Mandatory)][string]$Query,
+        [Parameter(Mandatory)][string[]]$Results,
+        [Parameter(Mandatory)][ValidateRange(1, [int]::MaxValue)][int]$PageSize
     )
-
-    $totalResults = $Results.Count
-    $totalPages = [int][Math]::Ceiling($totalResults / [double]$PageSize)
-    $currentPage = 0
-
+    if ([Console]::IsInputRedirected) {
+        Write-Warning 'hmm selection requires an interactive console.'
+        return $null
+    }
+    $totalPages = [int][Math]::Ceiling($Results.Count / [double]$PageSize)
+    $page = 0
     while ($true) {
-        Show-HmmPage `
-            -Query $Query `
-            -Results $Results `
-            -CurrentPage $currentPage `
-            -PageSize $PageSize
-
+        Show-HmmPage -Query $Query -Results $Results -CurrentPage $page -PageSize $PageSize
         Write-Host ''
-
-        if ($currentPage -lt ($totalPages - 1)) {
-            $promptText = 'Number = recall, Enter = next, P = previous, Q = quit: '
-        }
-        else {
-            $promptText = 'Number = recall, Enter = close, P = previous, Q = quit: '
-        }
-
-        Write-Host -NoNewline $promptText
-        $typedNumber = ''
-
+        $action = if ($page -lt $totalPages - 1) { 'next' } else { 'close' }
+        Write-Host -NoNewline "Number = recall, Enter = $action, P = previous, Q = quit: "
+        $digits = ''
         while ($true) {
-            $keyInfo = [Console]::ReadKey($true)
-            $ctrlPressed = (
-                ($keyInfo.Modifiers -band [ConsoleModifiers]::Control) -ne 0
-            )
-
-            if ($ctrlPressed -and $keyInfo.Key -eq [ConsoleKey]::C) {
-                Write-Host '^C'
-                return $null
-            }
-
-            if ($keyInfo.Key -eq [ConsoleKey]::Escape) {
+            try { $key = [Console]::ReadKey($true) }
+            catch {
                 Write-Host ''
+                Write-Warning 'This host does not expose console key input.'
                 return $null
             }
-
-            if ($keyInfo.Key -eq [ConsoleKey]::Backspace) {
-                if ($typedNumber.Length -gt 0) {
-                    $typedNumber = $typedNumber.Substring(0, $typedNumber.Length - 1)
-                    [Console]::Write("`b `b")
+            $ctrl = ($key.Modifiers -band [ConsoleModifiers]::Control) -ne 0
+            if ($ctrl -and $key.Key -eq [ConsoleKey]::C) { Write-Host '^C'; return $null }
+            if ($key.Key -eq [ConsoleKey]::Escape) { Write-Host ''; return $null }
+            if ($key.Key -eq [ConsoleKey]::Backspace) {
+                if ($digits.Length) {
+                    $digits = $digits.Substring(0, $digits.Length - 1)
+                    try { [Console]::Write("`b `b") } catch { Write-Host -NoNewline "`b `b" }
                 }
                 continue
             }
-
-            if ($keyInfo.Key -eq [ConsoleKey]::Enter) {
+            if ($key.Key -eq [ConsoleKey]::Enter) {
                 Write-Host ''
-
-                if ($typedNumber.Length -gt 0) {
-                    $selectedNumber = 0
-                    $validInteger = [int]::TryParse(
-                        $typedNumber,
-                        [ref]$selectedNumber
-                    )
-
-                    if (
-                        $validInteger -and
-                        $selectedNumber -ge 1 -and
-                        $selectedNumber -le $totalResults
-                    ) {
-                        return [PSCustomObject]@{
-                            Number = $selectedNumber
-                            Command = $Results[$selectedNumber - 1]
-                        }
+                if ($digits.Length) {
+                    $number = 0
+                    if ([int]::TryParse($digits, [ref]$number) -and $number -ge 1 -and $number -le $Results.Count) {
+                        return [pscustomobject]@{ Number = $number; Command = $Results[$number - 1] }
                     }
-
-                    Write-Host (
-                        'Invalid number. Choose a value from 1 to {0}.' -f
-                        $totalResults
-                    ) -ForegroundColor Yellow
+                    Write-Host "Invalid number. Choose a value from 1 to $($Results.Count)." -ForegroundColor Yellow
                     break
                 }
-
-                if ($currentPage -lt ($totalPages - 1)) {
-                    $currentPage++
-                    break
-                }
-
+                if ($page -lt $totalPages - 1) { $page++; break }
                 return $null
             }
-
-            if ([char]::IsDigit($keyInfo.KeyChar)) {
-                $typedNumber += $keyInfo.KeyChar
-                [Console]::Write($keyInfo.KeyChar)
+            if ([char]::IsDigit($key.KeyChar)) {
+                $digits += $key.KeyChar
+                try { [Console]::Write($key.KeyChar) } catch { Write-Host -NoNewline $key.KeyChar }
                 continue
             }
-
-            if ($typedNumber.Length -eq 0) {
-                $character = [char]::ToLowerInvariant($keyInfo.KeyChar)
-
-                if ($character -eq 'q') {
-                    Write-Host $keyInfo.KeyChar
-                    return $null
-                }
-
+            if (-not $digits.Length) {
+                $character = [char]::ToLowerInvariant($key.KeyChar)
+                if ($character -eq 'q') { Write-Host $key.KeyChar; return $null }
                 if ($character -eq 'p') {
-                    Write-Host $keyInfo.KeyChar
-
-                    if ($currentPage -gt 0) {
-                        $currentPage--
-                    }
-                    else {
-                        Write-Host 'Already on the first page.' `
-                            -ForegroundColor DarkGray
-                    }
-
+                    Write-Host $key.KeyChar
+                    if ($page -gt 0) { $page-- } else { Write-Host 'Already on the first page.' -ForegroundColor DarkGray }
                     break
                 }
             }
@@ -297,159 +212,100 @@ function global:Read-HmmSelection {
 }
 
 function global:Invoke-HmmSelector {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Query
-    )
-
+    param([Parameter(Mandatory)][string]$Query)
     $results = @(Find-HmmHistory -Query $Query)
     $global:HmmLastSearch = $Query
     $global:HmmLastResults = @($results)
-
-    if ($results.Count -eq 0) {
+    if (-not $results.Count) {
         Write-Host ''
-        Write-Host ('No results for: "{0}"' -f $Query) -ForegroundColor Yellow
+        Write-Host "No results for: `"$Query`"" -ForegroundColor Yellow
         return $null
     }
-
-    return Read-HmmSelection `
-        -Query $Query `
-        -Results $results `
-        -PageSize $global:HmmPageSize
+    Read-HmmSelection -Query $Query -Results $results -PageSize $global:HmmPageSize
 }
 
-# This function mainly reserves and documents the command name. In an
-# interactive session, the custom Enter handler intercepts hmm before normal
-# command execution.
+function global:Invoke-HmmPrompt {
+    # The explicit row prevents PSReadLine from redrawing above selector output.
+    try {
+        $row = [Console]::CursorTop
+        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, $row)
+        return
+    } catch {}
+    try { [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt() }
+    catch { Write-Warning 'PSReadLine could not redraw the prompt in this host.' }
+}
+
 function global:hmm {
     [CmdletBinding()]
-    param (
-        [Parameter(Position = 0, ValueFromRemainingArguments)]
-        [string[]]$Text
-    )
-
-    Write-Warning 'Use hmm <search text> as the only command on the input line.'
+    param([Parameter(Position = 0, ValueFromRemainingArguments)][string[]]$Text)
+    Write-Warning 'Type hmm <search text> as the only command on an interactive input line.'
 }
 
-Set-PSReadLineKeyHandler `
-    -Chord Enter `
-    -BriefDescription 'HmmSelectorOrAcceptLine' `
-    -LongDescription 'Open hmm or accept the input line normally' `
-    -ScriptBlock {
-
-        param($key, $arg)
-
-        $line = $null
-        $cursor = 0
-
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState(
-            [ref]$line,
-            [ref]$cursor
-        )
-
-        # Preserve the standard Enter behavior for every other command.
-        if ($line -notmatch '^\s*hmm(?:\s+(.*?))?\s*$') {
-            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
-            return
-        }
-
-        if ($Matches.ContainsKey(1)) {
-            $hmmArgument = $Matches[1].Trim()
-        }
-        else {
-            $hmmArgument = ''
-        }
-
-        [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-        Write-Host ''
-
-        if ([string]::IsNullOrWhiteSpace($hmmArgument)) {
-            Write-Host 'Usage: hmm <search text>' -ForegroundColor Yellow
-            Write-Host 'Example: hmm route' -ForegroundColor DarkGray
-
-            $promptRow = [Console]::CursorTop
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt(
-                $null,
-                $promptRow
-            )
-            return
-        }
-
-        # Remove one matching pair of surrounding quotes.
-        if ($hmmArgument.Length -ge 2) {
-            $firstCharacter = $hmmArgument[0]
-            $lastCharacter = $hmmArgument[$hmmArgument.Length - 1]
-            $doubleQuoted = $firstCharacter -eq '"' -and $lastCharacter -eq '"'
-            $singleQuoted = $firstCharacter -eq "'" -and $lastCharacter -eq "'"
-
-            if ($doubleQuoted -or $singleQuoted) {
-                $hmmArgument = $hmmArgument.Substring(
-                    1,
-                    $hmmArgument.Length - 2
-                )
-            }
-        }
-
-        # Direct recall from the last result set: hmm <number>
-        $requestedNumber = 0
-        $isNumber = [int]::TryParse($hmmArgument, [ref]$requestedNumber)
-
-        if ($isNumber) {
-            if (
-                $global:HmmLastResults -and
-                $requestedNumber -ge 1 -and
-                $requestedNumber -le $global:HmmLastResults.Count
-            ) {
-                $selectedCommand = [string]$global:HmmLastResults[
-                    $requestedNumber - 1
-                ]
-
-                $promptRow = [Console]::CursorTop
-                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt(
-                    $null,
-                    $promptRow
-                )
-                [Microsoft.PowerShell.PSConsoleReadLine]::Insert($selectedCommand)
-                [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
-                return
-            }
-
-            if (
-                -not $global:HmmLastResults -or
-                $global:HmmLastResults.Count -eq 0
-            ) {
-                Write-Host 'No hmm search has been run yet.' -ForegroundColor Yellow
-            }
-            else {
-                Write-Host (
-                    'Invalid number. Available results: 1-{0}.' -f
-                    $global:HmmLastResults.Count
-                ) -ForegroundColor Yellow
-            }
-
-            $promptRow = [Console]::CursorTop
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt(
-                $null,
-                $promptRow
-            )
-            [Microsoft.PowerShell.PSConsoleReadLine]::Insert($line)
-            [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
-            return
-        }
-
-        $selection = Invoke-HmmSelector -Query $hmmArgument
-
-        # Anchor the new prompt to the current console row. Without the row
-        # argument, PSReadLine can redraw the prompt above the result list.
-        $promptRow = [Console]::CursorTop
-        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt(
-            $null,
-            $promptRow
-        )
-
-        if ($null -ne $selection) {
-            $selectedCommand = [string]$selection.Command
-            [Microsoft.PowerShell.PSConsoleReadLine]::Insert($selectedCommand)
-            [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
-        }
+$global:HmmEnterHandler = {
+    param($key, $arg)
+    $line = $null; $cursor = 0
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+    if ($line -notmatch '^\s*hmm(?:\s+(.*?))?\s*$') {
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine(); return
     }
+
+    $argument = if ($Matches.ContainsKey(1)) { $Matches[1].Trim() } else { '' }
+    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+    Write-Host ''
+    if (-not $argument) {
+        Write-Host 'Usage: hmm <search text>' -ForegroundColor Yellow
+        Invoke-HmmPrompt
+        return
+    }
+    if ($argument.Length -ge 2 -and (($argument[0] -eq '"' -and $argument[-1] -eq '"') -or ($argument[0] -eq "'" -and $argument[-1] -eq "'"))) {
+        $argument = $argument.Substring(1, $argument.Length - 2)
+    }
+
+    $recall = Resolve-HmmResultNumber -Value $argument -Results $global:HmmLastResults
+    if ($recall.IsNumeric) {
+        if ($recall.IsValid) {
+            Invoke-HmmPrompt
+            [Microsoft.PowerShell.PSConsoleReadLine]::Insert($recall.Command)
+            [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
+            return
+        }
+        if (-not $global:HmmLastResults.Count) { Write-Host 'No hmm search has been run yet.' -ForegroundColor Yellow }
+        else { Write-Host "Invalid number. Available results: 1-$($global:HmmLastResults.Count)." -ForegroundColor Yellow }
+        Invoke-HmmPrompt
+        return
+    }
+
+    $selection = Invoke-HmmSelector -Query $argument
+    Invoke-HmmPrompt
+    if ($null -ne $selection) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::Insert([string]$selection.Command)
+        [Microsoft.PowerShell.PSConsoleReadLine]::EndOfLine()
+    }
+}
+
+function global:Enable-Hmm {
+    [CmdletBinding()]
+    param()
+    if ($global:HmmBindingEnabled) { return }
+    $current = Get-PSReadLineKeyHandler -Chord Enter -ErrorAction SilentlyContinue
+    if ($current -and $current.Function -eq 'HmmSelectorOrAcceptLine') {
+        # Re-sourcing replaces an older hmm handler with this script's current
+        # implementation without treating it as a third-party conflict.
+        Set-PSReadLineKeyHandler -Chord Enter -BriefDescription HmmSelectorOrAcceptLine -LongDescription 'Open hmm or accept the input line normally' -ScriptBlock $global:HmmEnterHandler
+        $global:HmmBindingEnabled = $true
+        return
+    }
+    if ($current -and $current.Function -ne 'AcceptLine') {
+        Write-Warning "Enter is already bound to '$($current.Function)'. hmm did not replace it. Disable the conflicting handler explicitly before running Enable-Hmm."
+        return
+    }
+    Set-PSReadLineKeyHandler -Chord Enter -BriefDescription HmmSelectorOrAcceptLine -LongDescription 'Open hmm or accept the input line normally' -ScriptBlock $global:HmmEnterHandler
+    $global:HmmBindingEnabled = $true
+}
+
+function global:Disable-Hmm {
+    Set-PSReadLineKeyHandler -Chord Enter -Function AcceptLine
+    $global:HmmBindingEnabled = $false
+}
+
+if ($env:HMM_TESTING -ne '1') { Enable-Hmm }

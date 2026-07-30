@@ -1,0 +1,40 @@
+#!/usr/bin/expect -f
+
+set timeout 10
+set history_file $env(HMM_TEST_HISTORY_FILE)
+set source_command $env(HMM_TEST_SOURCE_COMMAND)
+log_file -noappend $env(HMM_TEST_TRANSCRIPT)
+
+proc fail {message} {
+    puts stderr $message
+    exit 1
+}
+
+proc expect_empty_prompt {} {
+    expect -re {HMM_PROMPT> $}
+}
+
+spawn env HISTFILE=$history_file HMM_PAGE_SIZE=5 bash -c {stty rows 24 columns 120; exec "$1" --noprofile --rcfile "$2" -i} hmm-pty $env(HMM_TEST_BASH_PATH) $env(HMM_TEST_BASH_RC)
+expect_before timeout { fail "Timed out waiting for the interactive Bash PTY" }
+expect -exact "HMM_PROMPT> "
+
+# Ctrl+J submits setup commands without exercising the Ctrl+M binding that the
+# script(1) session already tests above.
+send -- "$source_command\n"
+send -- "printf '<%s>\\n' SOURCE_READY\n"
+expect -exact "<SOURCE_READY>"
+expect_empty_prompt
+
+send -- "hmm EXECUTED\r"
+expect -glob "Number = recall, Enter = *, P = previous, Q = quit: "
+send -- "\003"
+expect_empty_prompt
+
+# The token can only be printed if Ctrl+C closed the selector and left an empty
+# Readline buffer. It is deliberately assembled by printf so the echoed command
+# cannot satisfy the expectation.
+send -- "printf '<%s>\\n' CTRL_C_CLEAN\n"
+expect -exact "<CTRL_C_CLEAN>"
+expect_empty_prompt
+send -- "exit\n"
+expect eof
